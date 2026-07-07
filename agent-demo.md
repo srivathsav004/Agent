@@ -1,140 +1,495 @@
-# Agentic AI — Core Concepts
+# Agentic AI: A Primer for Techies
 
-A quick-reference guide for anyone who knows software but hasn't touched LLM/agent tooling yet.
-
----
-
-## 1. LLM Basics — Tokens, Params, Model Size
-
-**Tokens** are chunks of text (roughly ¾ of a word in English). "Hello world" ≈ 2 tokens.
-LLMs don't read letters — they read token IDs (numbers).
-
-- **Input tokens**: your prompt + context you feed in
-- **Output tokens**: what the model generates
-- **Context window**: max tokens (input + output combined) a model can "see" at once (e.g. 128K, 200K, 1M tokens)
-- **Cost/usage** = (input tokens × input price) + (output tokens × output price) — this is why long documents or chat history get expensive fast
-
-**Parameters ("params")** are the internal weights the model learned during training — think of them as the "knowledge dials." A "7B model" has 7 billion of these.
-
-| Size | Rough meaning |
-|---|---|
-| ~1-3B | Fast, cheap, runs on a laptop/phone, weaker reasoning |
-| ~7-13B | Good balance, still self-hostable |
-| ~70B+ | Strong reasoning, needs serious GPUs |
-| 100B+ (GPT-4/Claude class, often undisclosed) | Frontier reasoning, hosted via API |
-
-**Significance:** more params = generally better reasoning/knowledge, but slower & costlier. This is *not* the only lever anymore — training data quality, fine-tuning, and reasoning techniques matter as much as raw size today.
+> A concise guide to understanding and building AI agents — from first principles to production.
 
 ---
 
-## 2. What Is an "Agent"?
+## Table of Contents
+1. [What is an AI Agent?](#1-what-is-an-ai-agent)
+2. [LLMs: The Brain](#2-llms-the-brain)
+3. [Tokens & Cost](#3-tokens--cost)
+4. [RAG: Giving LLMs Memory](#4-rag-giving-llms-memory)
+5. [Vector Databases](#5-vector-databases)
+6. [Agentic Frameworks](#6-agentic-frameworks)
+7. [Building an Agent](#7-building-an-agent)
+8. [Agentic RAG](#8-agentic-rag)
+9. [Key Concepts You Might Be Missing](#9-key-concepts-you-might-be-missing)
+10. [Architecture Overview](#10-architecture-overview)
 
-A plain LLM call is a **question → answer**. It can't take actions or check facts.
+---
 
-An **agent** = LLM + ability to:
-1. Decide *what to do* (reason)
-2. Call a **tool** (search the web, query a DB, hit an API, run code)
-3. Look at the tool's result
-4. Repeat until it has a final answer
+## 1. What is an AI Agent?
 
-```mermaid
-flowchart LR
-    A[User Request] --> B[LLM Reasons]
-    B --> C{Need a tool?}
-    C -- yes --> D[Call Tool: search/DB/API]
-    D --> B
-    C -- no --> E[Final Answer]
+An **AI Agent** is an LLM-powered system that:
+- **Perceives** its environment (reads data, receives prompts)
+- **Reasons** about what to do next
+- **Acts** by calling tools (APIs, databases, code execution)
+- **Loops** until the goal is achieved
+
+```
+┌─────────────┐
+│   Input     │
+└──────┬──────┘
+       ▼
+┌─────────────┐     ┌─────────────┐
+│    LLM      │────▶│   Tools     │
+│  (Brain)    │◀────│  (APIs, DB) │
+└──────┬──────┘     └─────────────┘
+       │
+       ▼
+┌─────────────┐
+│   Output    │
+└─────────────┘
 ```
 
-This loop (reason → act → observe → repeat) is often called **ReAct**.
-
-**How you actually build one:**
-- Define tools (Python functions with clear descriptions)
-- Give the LLM the tool list — it decides *when* and *with what arguments* to call them ("function calling")
-- Your code executes the tool, feeds the result back to the LLM
-- A framework (LangChain/LangGraph, below) usually manages this loop for you
+**vs. Traditional Chatbot:**
+| Feature | Chatbot | Agent |
+|---------|---------|-------|
+| Memory | Session-only | Persistent + Retrieval |
+| Tools | None | APIs, code, databases |
+| Reasoning | Single-turn | Multi-step planning |
+| Autonomy | Reactive | Proactive |
 
 ---
 
-## 3. LangChain vs LangGraph
+## 2. LLMs: The Brain
 
-Both are Python frameworks for building LLM apps — they solve different problems.
+### What are "Billion Parameters"?
 
-| | LangChain | LangGraph |
-|---|---|---|
-| What it is | Toolkit of building blocks (prompts, chains, tool wrappers, memory) | Framework for building the agent's **control flow** as a graph |
-| Best for | Simple, mostly-linear pipelines (prompt → LLM → parse) | Complex agents needing loops, branching, retries, multi-agent handoffs |
-| Mental model | A pipeline / recipe | A **state machine** (nodes = steps, edges = "what happens next") |
-| Relationship | LangGraph is built by the same team, and typically *uses* LangChain components inside its nodes | — |
+| Model Size | Parameters | Analogy | Best For |
+|------------|------------|---------|----------|
+| Small | 1B–7B | Smart intern | Edge devices, simple tasks |
+| Medium | 13B–30B | Senior dev | Balanced speed & quality |
+| Large | 70B+ | Principal engineer | Complex reasoning, coding |
+| MoE (Mixture of Experts) | 8x7B, 8x22B | Team of specialists | Efficient large-scale inference |
 
-```mermaid
-flowchart TD
-    S[Start] --> N1[Node: Retrieve]
-    N1 --> N2[Node: Reason]
-    N2 -->|needs more info| N1
-    N2 -->|done| N3[Node: Respond]
+**Key insight:** More parameters ≠ always better. A 7B model with fine-tuning often beats a 70B model for domain-specific tasks.
+
+### Popular Models (2025)
+- **GPT-4o / o3** (OpenAI) — General purpose, multimodal
+- **Claude 3.5 Sonnet** (Anthropic) — Long context, reasoning
+- **Llama 3.1/3.2** (Meta) — Open weights, self-hostable
+- **DeepSeek-V3** — Open, MoE architecture
+- **Gemini 2.5 Pro** (Google) — Multimodal, long context
+
+---
+
+## 3. Tokens & Cost
+
+### What is a Token?
+A token is a sub-word unit. Roughly:
+- **1 token ≈ 0.75 words** (English)
+- **1 word ≈ 1.3 tokens**
+
+| Text | Tokens |
+|------|--------|
+| "Hello world" | 3 |
+| This paragraph (~50 words) | ~65 |
+| A 500-word blog post | ~650 |
+
+### Token Utilization Parameters
+When calling an LLM API, you specify:
+
+| Parameter | What It Does | Typical Value |
+|-----------|--------------|---------------|
+| `max_tokens` | Hard limit on output length | 256–4096 |
+| `temperature` | Creativity vs. determinism (0=robotic, 2=chaotic) | 0.0–1.0 |
+| `top_p` | Nucleus sampling (alternative to temperature) | 0.1–1.0 |
+| `frequency_penalty` | Reduces repetition | 0.0–2.0 |
+| `presence_penalty` | Encourages new topics | 0.0–2.0 |
+
+### Cost Calculation
 ```
-*A LangGraph graph — the loop and branching is explicit, unlike a straight LangChain pipeline.*
+Total Cost = (Input Tokens × Input Price) + (Output Tokens × Output Price)
 
----
-
-## 4. RAG (Retrieval-Augmented Generation)
-
-LLMs only know what they were trained on — nothing private, nothing recent. **RAG** fixes this by fetching relevant info first, then asking the LLM to answer *using it*.
-
-```mermaid
-flowchart LR
-    Q[User Question] --> E[Embed Question]
-    E --> V[(Vector DB)]
-    V --> R[Top-matching chunks]
-    R --> P[Prompt: Question + Chunks]
-    P --> L[LLM] --> A[Answer]
-```
-
-**Key pieces:**
-
-- **Chunking** — splitting big documents into smaller pieces (e.g. 500-1000 tokens each) so retrieval is precise and fits context limits.
-- **Embedding** — converting a chunk of text into a list of numbers (a vector) that captures its *meaning*. Similar meaning → similar vector.
-- **Vector DB** — a database built to store these vectors and quickly find the "closest" ones to a query vector (similarity search). **Qdrant** is one such vector DB (others: Pinecone, Weaviate, FAISS, Chroma).
-- **Retrieval** — embed the user's question, search the vector DB, pull back the top-N most relevant chunks.
-
-So the pipeline is: **document → chunk → embed → store in vector DB → (later) embed query → retrieve → feed to LLM.**
-
----
-
-## 5. Agentic RAG
-
-Regular RAG = one retrieval pass, then answer. It's a straight line.
-
-**Agentic RAG** = the agent *decides* when/what to retrieve, can retrieve multiple times, re-query if results are weak, combine multiple sources, or skip retrieval entirely if not needed.
-
-```mermaid
-flowchart TD
-    Q[Question] --> D{Agent decides}
-    D -->|retrieve| V[(Vector DB)]
-    V --> D
-    D -->|need web data too| W[Web/API tool]
-    W --> D
-    D -->|enough info| A[Final Answer]
+Example: GPT-4o
+- Input: $2.50 / 1M tokens
+- Output: $10.00 / 1M tokens
+- 1M input + 200K output = $2.50 + $2.00 = $4.50
 ```
 
-In short: **RAG is a fixed pipeline. Agentic RAG is RAG as one tool among many, orchestrated by reasoning.**
+---
+
+## 4. RAG: Giving LLMs Memory
+
+**RAG = Retrieval-Augmented Generation**
+
+LLMs have a **knowledge cutoff** and **no access to private data**. RAG fixes both.
+
+### How RAG Works
+
+```
+┌─────────────────────────────────────────┐
+│           RAG Pipeline                  │
+├─────────────────────────────────────────┤
+│                                         │
+│  1. LOAD        2. CHUNK      3. EMBED  │
+│  ┌─────┐       ┌──────┐      ┌──────┐   │
+│  │PDFs │──────▶│Chunks│─────▶│Vectors│  │
+│  │Docs │       │(512tk)│      │(768d) │  │
+│  │APIs │       └──────┘      └──────┘   │
+│  └─────┘           │            │       │
+│                    ▼            ▼       │
+│              ┌─────────┐  ┌──────────┐  │
+│              │Overlap  │  │ Vector DB│  │
+│              │(20%)    │  │(Qdrant)  │  │
+│              └─────────┘  └──────────┘  │
+│                                         │
+│  4. QUERY ───────────────────────────▶  │
+│     "How do I deploy?"                  │
+│         │                               │
+│         ▼                               │
+│  5. RETRIEVE (Top-K=5)                  │
+│         │                               │
+│         ▼                               │
+│  6. AUGMENT PROMPT                      │
+│     [Context] + [User Query]            │
+│         │                               │
+│         ▼                               │
+│  7. GENERATE                            │
+│     LLM answers with retrieved facts    │
+│                                         │
+└─────────────────────────────────────────┘
+```
+
+### Chunking Strategies
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| **Fixed-size** | Split every N tokens | General docs |
+| **Recursive** | Split by headers, then by size | Structured docs |
+| **Semantic** | Split at semantic boundaries | Narrative text |
+| **Agentic** | LLM decides chunk boundaries | Complex documents |
+
+**Chunk Size Rule of Thumb:** 256–1024 tokens with 10–20% overlap.
+
+### Embeddings
+
+Embeddings convert text into **dense vectors** (arrays of numbers) where similar meanings are close together in vector space.
+
+```
+"cat"    → [0.12, -0.45, 0.89, ...]  (768 or 1536 dimensions)
+"kitten" → [0.15, -0.42, 0.85, ...]  ← close to "cat"
+"car"    → [-0.33, 0.71, -0.12, ...] ← far from "cat"
+```
+
+Popular embedding models:
+- **OpenAI `text-embedding-3-large`** — 3072 dims, best quality
+- **Cohere `embed-english-v3`** — 1024 dims, fast
+- **BGE-M3** (BAAI) — Open, multilingual
+- **Nomic Embed** — Open, 768 dims
 
 ---
 
-## 6. Putting It Together — What's Missing?
+## 5. Vector Databases
 
-Things worth a one-liner if he asks, or to show you know the full picture:
+A **Vector DB** stores embeddings and performs **similarity search** (find vectors closest to a query).
 
-- **Fine-tuning** vs **prompting**: fine-tuning retrains weights on your data (expensive, rare); most apps just engineer better prompts + RAG instead.
-- **Function/Tool calling**: the mechanism that lets an LLM output structured "call this function with these args" — the backbone of agents.
-- **Multi-agent systems**: multiple specialized agents (e.g. researcher, writer, reviewer) coordinating — LangGraph is often used for this.
-- **Memory**: short-term (conversation history) vs long-term (stored facts, often via a vector DB again).
-- **Evaluation/guardrails**: checking agent outputs for correctness/safety before they reach a user — increasingly important as agents take real actions.
-- **MCP (Model Context Protocol)**: an emerging standard for plugging tools/data sources into any LLM app in a consistent way — worth a mention as "where this is heading."
+```
+┌─────────────────────────────────────┐
+│        Vector Database              │
+├─────────────────────────────────────┤
+│                                     │
+│  Collection: "company_docs"         │
+│  ┌─────────┬────────────────────┐   │
+│  │ ID      │ Vector (768 dims)  │   │
+│  ├─────────┼────────────────────┤   │
+│  │ chunk_1 │ [0.1, -0.2, ...]   │   │
+│  │ chunk_2 │ [0.3, 0.1, ...]    │   │
+│  │ chunk_3 │ [-0.1, 0.4, ...]   │   │
+│  └─────────┴────────────────────┘   │
+│                                     │
+│  Query: "deployment guide"          │
+│  → Returns: chunk_1, chunk_3 (Top-K)│
+│                                     │
+│  Similarity Metrics:                │
+│  • Cosine (most common)             │
+│  • Euclidean                        │
+│  • Dot Product                      │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### Popular Vector DBs
+
+| Database | Type | Best For |
+|----------|------|----------|
+| **Qdrant** | Open-source, Rust | Self-hosted, hybrid search |
+| **Pinecone** | Managed SaaS | Zero-ops, fast start |
+| **Weaviate** | Open-source | Graph + vector hybrid |
+| **Chroma** | Embedded | Prototyping, local dev |
+| **Milvus/Zilliz** | Distributed | Enterprise scale |
+| **pgvector** | Postgres extension | Existing PG users |
 
 ---
 
-## 7. One-Slide Summary
+## 6. Agentic Frameworks
 
-> An **LLM** predicts text token-by-token. Give it **tools** and a decision loop → it's an **agent**. Give it a **memory of your documents** via chunking + embeddings + a vector DB → that's **RAG**. Combine both, letting it decide *when* to retrieve → **Agentic RAG**. **LangChain/LangGraph** are just the scaffolding that wires all this together in code.
+### LangChain
+
+**LangChain** is the most popular framework for building LLM apps. It provides:
+- **Chains**: Sequences of calls (LLM → Tool → LLM)
+- **Agents**: LLM decides which tool to use next
+- **Memory**: Conversation persistence
+- **Document Loaders**: PDF, web, database ingestion
+
+```
+LangChain Ecosystem:
+┌─────────────┐
+│  LangChain  │  ← Core framework (Python/JS)
+├─────────────┤
+│  LangGraph  │  ← State machines for multi-agent flows
+├─────────────┤
+│ LangSmith   │  ← Observability & tracing
+├─────────────┤
+│ LangServe   │  ← Deploy chains as REST APIs
+└─────────────┘
+```
+
+### LangGraph
+
+**LangGraph** adds **cycles** to LangChain — essential for agents that need to loop (think → act → observe → repeat).
+
+```
+LangGraph State Machine:
+
+┌─────────┐     ┌─────────┐     ┌─────────┐
+│  START  │────▶│  Agent  │────▶│  Tool   │
+└─────────┘     │  (LLM)  │◀────│ (Action)│
+                └────┬────┘     └─────────┘
+                     │
+                     ▼
+                ┌─────────┐
+                │  END    │
+                └─────────┘
+
+The agent loops between reasoning and acting until done.
+```
+
+### Other Frameworks
+
+| Framework | Focus | Best For |
+|-----------|-------|----------|
+| **LlamaIndex** | Data ingestion & RAG | Complex document pipelines |
+| **CrewAI** | Multi-agent orchestration | Team-of-agents workflows |
+| **AutoGen** (Microsoft) | Conversational agents | Multi-agent chat |
+| **Pydantic AI** | Type-safe agents | Production Python apps |
+| **Semantic Kernel** (Microsoft) | Enterprise integration | .NET/Python enterprise |
+
+---
+
+## 7. Building an Agent
+
+### Minimal Agent (Pseudocode)
+
+```python
+# 1. Define Tools
+tools = [search_web, query_database, send_email]
+
+# 2. Create Agent
+agent = Agent(
+    llm="gpt-4o",
+    tools=tools,
+    system_prompt="You are a helpful assistant. Use tools when needed."
+)
+
+# 3. Run
+response = agent.run("Find the latest sales report and email it to the team")
+
+# Behind the scenes:
+# Step 1: LLM decides → call query_database
+# Step 2: LLM receives result → decides → call send_email
+# Step 3: LLM confirms → return success message
+```
+
+### Agent Components
+
+```
+┌─────────────────────────────────────────┐
+│           Agent Architecture            │
+├─────────────────────────────────────────┤
+│                                         │
+│  ┌─────────────┐                        │
+│  │   Planner   │  ← Decides strategy    │
+│  │  (LLM/CoT)  │                        │
+│  └──────┬──────┘                        │
+│         │                               │
+│         ▼                               │
+│  ┌─────────────┐                        │
+│  │   Executor  │  ← Calls tools         │
+│  │  (Tool Use) │                        │
+│  └──────┬──────┘                        │
+│         │                               │
+│         ▼                               │
+│  ┌─────────────┐                        │
+│  │   Memory    │  ← Stores context      │
+│  │ (Short/Long)│                        │
+│  └──────┬──────┘                        │
+│         │                               │
+│         ▼                               │
+│  ┌─────────────┐                        │
+│  │  Observer   │  ← Evaluates results   │
+│  │ (Self-check)│                        │
+│  └─────────────┘                        │
+│                                         │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## 8. Agentic RAG
+
+**Agentic RAG** = RAG + Agent reasoning. The agent doesn't just retrieve once — it **iteratively searches, reasons, and refines**.
+
+### Traditional RAG vs. Agentic RAG
+
+```
+Traditional RAG:                    Agentic RAG:
+┌──────────┐                       ┌──────────┐
+│  Query   │                       │  Query   │
+└────┬─────┘                       └────┬─────┘
+     │                                │
+     ▼                                ▼
+┌──────────┐                       ┌──────────┐
+│ Retrieve │                       │  Plan    │
+│  (1x)    │                       │(Strategy)│
+└────┬─────┘                       └────┬─────┘
+     │                                │
+     ▼                                ▼
+┌──────────┐                       ┌──────────┐
+│ Generate │                       │ Retrieve │
+│  (1x)    │                       │ (Maybe   │
+└──────────┘                       │ multiple)│
+                                   └────┬─────┘
+                                       │
+                                       ▼
+                                  ┌──────────┐
+                                  │ Evaluate │
+                                  │ (Good    │
+                                  │ enough?) │
+                                  └────┬─────┘
+                                       │
+                              No ◀─────┘─────▶ Yes
+                              │                 │
+                              ▼                 ▼
+                         ┌──────────┐      ┌──────────┐
+                         │ Refine   │      │ Generate │
+                         │ Query    │      │  Answer  │
+                         └──────────┘      └──────────┘
+```
+
+### Agentic RAG Patterns
+
+| Pattern | How It Works |
+|---------|--------------|
+| **Self-RAG** | Agent evaluates if retrieved chunks are useful; discards bad ones |
+| **Corrective RAG** | Agent routes to web search if local retrieval is insufficient |
+| **Adaptive RAG** | Agent chooses retrieval strategy based on query complexity |
+| **Multi-Hop RAG** | Agent chains multiple retrievals to answer complex questions |
+
+---
+
+## 9. Key Concepts You Might Be Missing
+
+### Prompt Engineering
+- **Zero-shot**: No examples, just instructions
+- **Few-shot**: 2–5 examples in the prompt
+- **Chain-of-Thought (CoT)**: "Let's think step by step..."
+- **ReAct**: Reasoning + Acting pattern (the foundation of agents)
+
+### Fine-Tuning vs. RAG
+
+| | Fine-Tuning | RAG |
+|---|-------------|-----|
+| **What** | Retrain model weights | Inject context at inference |
+| **Cost** | High (GPU, data prep) | Low (vector search) |
+| **Updates** | Retrain needed | Just add documents |
+| **Best For** | Behavior/style changes | Factual knowledge |
+
+### Evaluation Metrics
+- **Retrieval**: Hit Rate, MRR, NDCG
+- **Generation**: BLEU, ROUGE, Faithfulness, Answer Relevance
+- **Agent**: Task Success Rate, Steps to Complete, Cost per Task
+
+### Guardrails
+- **Input**: Block harmful prompts, PII detection
+- **Output**: Fact-checking, toxicity filtering, compliance
+- **Tools**: Rate limiting, sandboxed execution
+
+### MCP (Model Context Protocol)
+A standard for connecting LLMs to external data sources and tools. Think "USB-C for AI agents."
+
+### Multi-Agent Systems
+Multiple specialized agents collaborating:
+- **Planner Agent**: Breaks down tasks
+- **Coder Agent**: Writes code
+- **Reviewer Agent**: Checks output
+- **Orchestrator**: Manages the team
+
+---
+
+## 10. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Production Agent Stack                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐        │
+│  │   User      │   │   APIs      │   │  Databases  │        │
+│  │  Interface  │   │  (REST/gRPC)│   │  (SQL/NoSQL)│        │
+│  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘        │
+│         │                 │                 │               │
+│         └─────────────────┼─────────────────┘               │
+│                           ▼                                 │
+│                  ┌─────────────────┐                        │
+│                  │ Agent Framework │                        │
+│                  │ (LangChain/Graph)│                       │
+│                  └────────┬────────┘                        │
+│                           │                                 │
+│         ┌─────────────────┼─────────────────┐               │
+│         ▼                 ▼                 ▼               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │    LLM      │  │   Vector    │  │   Memory    │          │
+│  │ (GPT/Claude)│  │    DB       │  │  (Redis/DB)│           │
+│  │             │  │ (Qdrant/etc)│  │             │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              Observability (LangSmith/Phoenix)      │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Reference Cheat Sheet
+
+| Term | One-Liner |
+|------|-----------|
+| **Agent** | LLM + Tools + Memory + Loop |
+| **RAG** | Retrieve docs → Inject into prompt → Generate |
+| **Vector DB** | Database for similarity search on embeddings |
+| **Embedding** | Text → Numbers (vector) |
+| **Chunking** | Splitting docs into bite-sized pieces |
+| **Token** | Sub-word unit (~0.75 words) |
+| **Temperature** | Creativity dial (0 = deterministic) |
+| **LangChain** | Framework for LLM apps |
+| **LangGraph** | Cycles/state machines for agents |
+| **Fine-tuning** | Retraining model on custom data |
+| **Guardrails** | Safety checks on input/output |
+| **MCP** | Standard protocol for AI tools |
+
+---
+
+## Further Reading
+- [LangChain Docs](https://python.langchain.com/)
+- [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
+- [Qdrant Docs](https://qdrant.tech/documentation/)
+- [LlamaIndex Docs](https://docs.llamaindex.ai/)
+- [Building LLM Apps by Simon Willison](https://simonwillison.net/)
+
+---
+
+*Built for a 30-minute demo. Revise, present, impress.* 🚀
